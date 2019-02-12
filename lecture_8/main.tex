@@ -7,6 +7,10 @@
 \usepackage{graphicx}
 \usepackage{subfig}
 \graphicspath{ {images/} }
+\usepackage{amsmath}
+\usepackage{algorithm}
+\usepackage[noend]{algpseudocode}
+\usepackage{hyperref}
 % \usepackage{caption}
 % \usepackage{subcaption}
 
@@ -62,7 +66,19 @@
 \lecture{8}{Information Extraction, Machine Learning for Robot Autonomy}{}
 
 \section{Introduction}
-The goal of this lecture is to learn techniques for information extraction. Our particular focus in this lecture will be on: 1) Finding geometric primitives to assist in robot's localization and mapping; and 2) Object recognition and scene understanding that is useful for autonomous robots in ways such as localization within a topological map and for high-level reasoning.
+The goal of this lecture is to learn techniques for information extraction, particularly in the context of camera images. Our particular focus in this lecture will be:
+
+\begin{itemize}
+    \item Identifying geometric primitives within an image to assist in robot localization and mapping. Techniques covered include the Split \& Merge algorithm, the RANSAC algorithm, and the Hough transform.
+    
+    \item Object recognition and scene understanding that is useful for autonomous robots in ways such as localization within a topological map and for high-level reasoning. To this end, we will use techniques from Machine Learning as they apply to visual recognition.
+    
+    \begin{itemize}
+        \item Lecture 8 covers what the different types of machine learning are, the basic statistical ideas behind machine learning, and the details of the linear classifier model architecture. 
+        \item Lecture 9 discusses the neural net model architecture, what a convolutional neural net is, and how these have been applied in the context of robotics.
+    \end{itemize}
+    
+\end{itemize}
 
 % However, sensor measurements are susceptible to noise. Therefore, we first need to discuss the mathematical characterization of uncertainty. After discussing about ways to represent and analyze uncertainty effects in Section 8.2, we move to discuss our primitive goals of information extraction in the later sections.
 
@@ -109,7 +125,8 @@ $$\alpha^* = \frac{1}{2} \arctan\left(\frac{\sum_i^n w_i \rho_i^2\sin(2\theta_i)
 
 \subsection{Segmentation}
 There are several algorithms that help in the task of segmentation. Three such popular algorithms are discussed below.
-\subsubsection{Split-and-merge algorithm}
+
+\subsubsection{Iterative Split-and-Merge Algorithm}
 It is the most popular line extraction algorithm, arguably the fastest but not as robust to outliers as other algorithms. Algorithm 1 below gives a high level understanding of its working.
 
 \begin{center}
@@ -123,16 +140,47 @@ There is another popular variant of split-and-merge algorithm, the Iterative-end
 	\captionof{figure}{Iterative-end-point-fit variant of split-and-merge algorithm \cite{SNS}}
 \end{center}
 
-\subsubsection{RANSAC (Random Sample Consensus)}
-The RANSAC algorithm has wide reaching applications outside of just line segmentation. It can be used generally to find parameters of a model using a dataset with outliers. Here we will just use it for line segmentation.
+\subsubsection{Recursive Split-and-Merge Algorithm}
+\begin{algorithm}
+\caption{Recursive Split-and-Merge}\label{euclid}
+\begin{algorithmic}[1]
+\Procedure{Recursive Split-and-Merge}{$\theta$, $\rho$, $start$, $end$,  $\vec{\alpha}$, $\vec{r}$, $lines$}
 
-RANSAC is an iterative and non-deterministic algorithm. The probability of finding a set free of outliers increases as the number of iterations increases. An overview of the algorithm as applied to line segmentation is as follows:
+\State $\theta_{curr}$ = $\theta$[start:end]
+\State $\rho_{curr}$ = $\rho$[start:end]
+\State $currLine = f(\theta, \rho)$
+\State    $\alpha, r \gets$ fit individual line segment
+\State    $index_{split} \gets$ find an index to split at
+\If {line segment cannot split up:}
+\State $\vec{\alpha} \gets \alpha$
+\State $\vec{r} \gets r$
+\State $\vec{lines} \gets currLine$
+\Else
+\State Recurse forward with: ($\theta$, $\rho$, $start$, $start + index_{split} + 1$,  $\vec{\alpha}$, $\vec{r}$, $lines$)
+
+\State Recurse forward with: ($\theta$, $\rho$, $start + index_{split}$, end,  $\vec{\alpha}$, $\vec{r}$, $lines$)
+\EndIf
+\EndProcedure
+\end{algorithmic}
+\end{algorithm}
+
+
+\subsubsection{RANSAC (Random Sample Consensus)}
+The RANSAC algorithm has wide reaching applications outside of just line segmentation. It can be used generally to find parameters of a model using a dataset with outliers. This is advantageous in a variety of contexts, such as line fitting. While some techniques like least squares estimation can be highly skewed by a few outliers, RANSAC is generally robust to outliers. Here we will just use it for line segmentation.
+
+RANSAC is an iterative and non-deterministic algorithm. The probability of finding a set free of outliers increases as the number of iterations increases. RANSAC can be viewed as a repeated two step process: 1) classify datapoints as inliers our outliers and 2) fit model to inliers while ignoring outliers. An overview of the algorithm as applied to line segmentation is as follows:
 \begin{center}
 	\includegraphics[width=0.5\textwidth]{RANSACOverview}
 	%\includegraphics[width=0.5\textwidth]{RANSACEx}
 \end{center}
 
-However, this would imply that we would need to iterate through all possibilities of pairs of points in the set. If $|S| = N$, then the number of iterations needed is
+The figure below illustrates RANSAC graphically. In this example, we begin with a dataset of green dots. First, we choose two points at random (colored in yellow) to form a line $L_1$. We then compute the distance of all the other points from this line and construct an inlier set of all points (colored in red) that lie within a certain distance from $L_1$. In this example, this process is repeated four times, yielding four inlier sets. At the end of the procedure, we choose the line that yielded the largest inlier set as the line of best fit.
+
+\begin{center}
+	\includegraphics[width=\textwidth]{RANSAC}
+\end{center}
+
+At first glance, the RANSAC algorithm seems to imply that we would need to iterate through all possibilities of pairs of points in the set. In that case, if $|S| = N$, then the number of iterations needed is
 $\frac{N(N-1)}{2}.$
 
 This is too many iterations, but if we know roughly how many inliers are in the set, we can find a sufficient number of iterations. Let $w$ be the percentage of inliers in the dataset, i.e.,
@@ -268,7 +316,7 @@ Hough Transform is an elegant solution and can be seen as the middle ground of t
 \section{Object recognition and scene understanding}
 Key idea: Capture an object as a set of descriptors and compare against a dictionary to identify the object.
 
-We will briefly examine a technique known as Bag of Words. From an image of a duck, we might extract features such as beak, eyes, and feet. We then compare against a dictionary to check what images we have seen in th past that also contain a beak, eyes, and feet. We are given probabilities associated with past images and we select the image with the highest probability (probably a duck, probably not a raccoon).
+We will briefly examine a technique known as Bag of Words. From an image of a duck, we might extract features such as beak, eyes, and feet. We then compare against a dictionary to check what images we have seen in the past that also contain a beak, eyes, and feet. We are given probabilities associated with past images and we select the image with the highest probability (probably a duck, probably not a raccoon).
 
 \begin{center}
 	\includegraphics[width=0.6\textwidth]{bag_of_words}
@@ -288,9 +336,11 @@ Machine learning can be divided into two sub-categories: (1) supervised learning
 \item In unsupervised learning, we wish to find patterns in the data $(x^1, x^2, \dots, x^n)$, which do not come with labels $y_i$, as was the case with supervised learning.
 \end{itemize}
 
+Supervised learning techniques are most useful for the online, real-time object and scene recognition tasks which enable more advanced decision making in autonomous robots. Thus this lecture and lecture 9 will focus primarily on supervised learning, with a particular eye towards visual recognition tasks. Unsupervised learning is not often used in an online context, and instead would be more likely applied offline for things like characterizing a large dataset. 
+
 \subsection{Supervised learning}
 
-Supervised learning algorithms can achieve two tasks: regression and classification. In regression, chosen functions mapping data to discrete-values. In classification, functions classify data into distinct categories as seen in Figure \ref{fig:supervised_learning}
+Supervised learning algorithms can achieve two tasks: regression and classification. In regression, the goal is to find a function that maps the data to discrete-values. In classification, a different function instead classifies data into distinct categories. A visual comparison of these two techniques is shown in Figure \ref{fig:supervised_learning}
 
 \begin{figure}[!ht]%
     \centering
@@ -303,7 +353,7 @@ Supervised learning algorithms can achieve two tasks: regression and classificat
 
 \subsection{Loss Functions}
 
-In order to select the best function $f(x) \approx y$, we must define a loss metric to be minimized.
+In order to select the best function $f(x) \approx y$, we must define a loss metric (aka quality metric) to be minimized.
 
 For regression we can use the $\ell^2$ or $\ell^1$ loss. The $\ell^2$ loss is defined as:
 $$\ell^2 \ Loss: \ \sum_{i} |f(x^i) - y^i|^2$$
@@ -321,6 +371,8 @@ This metric simply treats the number of times the function incorrectly classifie
 The cross entropy loss is defined as:
 $$Cross\ Entropy\ Loss: \ -\sum_{i} (y^i)^T \log{f(x^i)}$$
 
+For more details on specific loss functions see \url{http://cs231n.github.io/linear-classify/#loss}
+
 \subsection{Learning Models}
 
 \begin{figure}[!ht]%
@@ -337,27 +389,27 @@ $$Cross\ Entropy\ Loss: \ -\sum_{i} (y^i)^T \log{f(x^i)}$$
     \label{fig:nonparametric_models}%
 \end{figure}
 
-There are two approaches to learning functions or models for classification and regression tasks. Parametric models, such as linear regression or linear classifiers, are functions represented by parameters (see Figure \ref{fig:parametric_models}).
+There are two approaches to learning functions or models for classification and regression tasks. Parametric models, such as linear regression or linear classifiers, are functions represented by parameters (see Figure \ref{fig:parametric_models}). After these models are trained, the original training data is not needed for future use, as the model relies on only the value of the parameters to make predictions. Examples of parametric models include linear classifiers and neural networks. 
 
-Non-parametric models do not depend on parameters. For example, non-parametric spline fitting involves building up piecewise models to fit the data. k-Nearest Neighbors classifies samples based on the class most common amongst its k nearest neighbors. This algorithm approximates the test set value using the values from its neighbors in the training set. k nearest neighbor algorithm is mostly used in image compression. See Figure \ref{fig:nonparametric_models}. Other non parametric algorithms include support vector machines and the EM algorithm.
+Non-parametric models do not depend on parameters. In these models, predictions are dependant on the the original training data. One common example of this type is k-Nearest Neighbors, which classifies samples based on the class most common amongst its k nearest neighbors. This algorithm approximates the test set value using the values from its neighbors in the training set. k nearest neighbor algorithm is mostly used in image compression. See Figure \ref{fig:nonparametric_models}. Other non parametric algorithms include spline fitting, support vector machines and the EM algorithm.
 
 
 \subsection{Machine Learning as Optimization}
 
-For parametric models, how do we select the best parameters to fit the training data? Analytical approaches to solving this problem include least squares. For large datasets, however, this may pose computational challenges. Other popular approaches include numerical methods, such as gradient descent.
+For parametric models, how do we select the best parameters to fit the training data? Analytical approaches to solving this problem include least squares. For large datasets, however, analytical solutions may be impossible or too computationally expensive to use. Other popular approaches include numerical methods, such as gradient descent (performed on the loss function with respect to the parameters of the model).
 
-Full gradient descent may be computationally inefficient, as each iteration requires a computation over the entire batch of training data. Instead, we can use stochastic gradient descent (Figure \ref{fig:sgd}) or batch gradient descent, which compute gradients over small portions of the training data with each iteration.
+Full gradient descent may be computationally inefficient, as each iteration requires a computation over the entire batch of training data. Instead, we can use stochastic gradient descent or mini-batch gradient descent, which compute the gradient over a small portion of the training data with each iteration. The only difference between mini-batch and stochastic is that stochastic actually uses a sample size of 1, while mini-batch uses a larger sample size (confusingly, these terms are used interchangeably in some literature). These gradients are used as approximations of the true gradient when updating the model's parameters. The resulting procedure is very noisy (see Fig. \ref{fig:sgd}) but in practice it works quite well for finding the optimum parameters. 
 
 \begin{figure}[!ht]%
     \centering
     \includegraphics[width=5cm]{sgd}
-    \caption{Stochastic Gradient Descent}
+    \caption{Stochastic Gradient Descent converging to global minimum}
     \label{fig:sgd}%
 \end{figure}
 
 \subsection{Machine Learning as Optimization}
 
-The overarching goal of machine learning is to perform well on unseen data. As such, we must avoid over-fitting on the training data to ensure that model performance generalizes to test data. We can perform regularization by adding additional terms to the loss function to penalize "model complexity".
+The overarching goal of machine learning is to perform well on unseen data. As such, we must avoid over-fitting on the training data to ensure that model performance generalizes to test data. We can perform regularization by adding additional terms to the loss function to penalize "model complexity". Since more complex models will typically have parameters with very large magnitudes, a simple way to do this is to add a term which penalizes the size of the parameters. Defining A to be the matrix of weights, some common approaches to regularization include: 
 
 \begin{itemize}
 \item $\ell^2$ regularization: $\|A\|_2$ often corresponds to a Gaussian prior on parameters $A$.
@@ -367,7 +419,7 @@ The overarching goal of machine learning is to perform well on unseen data. As s
 
 Regularization can also be performed by tuning hyperparameters relevant to the learning model. For example, with k-Nearest neighbors, larger values for $k$ result in greater regularization as seen in (a) of Figure \ref{fig:hyper_parameters}.
 
-For kNN, plotting the training error and test errors with respect to $\frac{1}{k}$ allows us to determine the optimal hyperparameter value. As seen in (b) of Figure \ref{fig:hyper_parameters}, larger $k$ achieves improved performance, but beyond $\frac{1}{k} = 0.1$, the test error increases due to overfitting.
+For kNN, plotting the training error and test errors with respect to $\frac{1}{k}$ allows us to determine the optimal hyperparameter value. As seen in (b) of Figure \ref{fig:hyper_parameters}, larger $k$ achieves improved performance, but as $k$ increases beyond the point where $\frac{1}{k} = 0.1$, the test error increases due to underfitting.
 
 \begin{figure}[!ht]%
     \centering
@@ -394,7 +446,14 @@ For example let's say we are trying to classify RGB images of size 32x32 into on
     \label{fig:cat_classifier}%
 \end{figure}
 
-Note that each row of matrix $W$ performs a dot product operation with input $x$, which combined with bias $b$, produces a score corresponding to a particular class. We can interpret each row of matrix $W$ as a "template" performing nearest neighbor classification. The elements of each row are ideally weighted such that pixel values that tend to be associated with a particular class will produce a higher score in the class associated with said row.
+Note that each row of matrix $W$ performs a dot product operation with input $x$, which combined with bias $b$, produces a score corresponding to a particular class. We can interpret each row of matrix $W$ as a "template" performing nearest neighbor classification. The elements of each row are ideally weighted such that pixel values that tend to be associated with a particular class will produce a higher score in the class associated with said row. These templates can be reformed into images from the weights, and you can actually see (if you squint and apply a bit of imagination) some of the class characteristics in these template images (Fig. \ref{fig:weight_images})
+
+\begin{figure}[!ht]%
+    \centering
+    \includegraphics[width=14cm]{reformed_weight_images}
+    \caption{Images reformed from the weights of a linear classifier trained on CIFAR-10}
+    \label{fig:weight_images}%
+\end{figure}
 
 \subsection{Dot Products as a Measure of Similarity}
 
@@ -405,8 +464,6 @@ Cosine similarity is described by the following:
 $$\cos(\theta) = \frac{w^Tx}{\| w \| \|x\|} $$
 
 We can interpret the linear classifier as performing projections that determine "how much" of each row of weights $w$ associated with a particular class are in input $x$. When weights $w$ and input $x$ are similar, $\cos(\theta) \approx 1$. When they are not similar, $\cos(\theta) \approx -1$.
-
-
 
 \subsection{Generalized Linear Models}
 Linear regression and classification  are special cases of a broad family of models called Generalized Linear Models. In a generalized linear model, each outcome $Y$ of the dependent variables is assumed to be generated from a particular distribution in the exponential family, a large range of probability distributions that includes the normal, binomial, Poisson and gamma distributions, among others \cite{10.2307/2344614}.
@@ -445,6 +502,13 @@ In other words, our hypothesis will output the estimated probability that $p(y =
 
 
 \subsection{Histogram of Oriented Gradients (HOG)}
+\begin{figure}[!ht]%
+    \centering
+    \includegraphics[width=10cm]{hog_example.png}
+    \caption{Histogram of Oriented Gradients Example}
+    \label{fig:hog_example}%
+\end{figure}
+
 The histogram of oriented gradients is a feature descriptor used for object detection in computer vision and machine learning \cite{wikipedia_2017}.
 Local object appearance and shape within an image can be described by the distribution of intensity gradients or edge directions. The image is divided into small connected regions called cells, and for the pixels within each cell, a histogram of gradient directions is compiled. The descriptor is the concatenation of these histograms. For improved accuracy, the local histograms can be contrast-normalized by calculating a measure of the intensity across a larger region of the image, called a block, and then using this value to normalize all cells within the block. This normalization results in better invariance to changes in rotation, scale, intensity, and viewpoint change.
 Calculating the HOGs involves the following steps: \\
@@ -474,9 +538,14 @@ Feature extraction is a technique that reduces the amount of information require
 \bibliographystyle{alpha}
 \bibliography{sample}
 
+\subsubsection*{Additional Reading \& Materials}
+
+N. Dalal and B. Triggs. Histogram of Oriented Gradients for Human Detection. \url{https://lear.inrialpes.fr/people/triggs/pubs/Dalal-cvpr05.pdf} \\
+Information Extraction: Introduction to Autonomous Mobile Robots, 4.1.3, 4.6.1 - 4.6.5, 4.7.1 - 4.7.4 \\
+CNN's for Visual Recognition: CS 231N, \url{http://cs231n.github.io/}
 
 \subsubsection*{Contributors}
-Winter 2019: [Your Names Here]
+Winter 2019: Brian Do, Esteban Mejia, Darren Mei, Wesley Guo, Minh Duc
 \\
 Winter 2018: Richard Akira Heru, Tarun Punnoose, Dhruv Samant, Vince Chiu, Vincent Chow, Ayush Gupta
 
